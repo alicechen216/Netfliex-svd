@@ -235,6 +235,15 @@
             border-left: 4px solid #28a745;
         }
 
+        .error-box {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            border-left: 4px solid #f5c6cb;
+        }
+
         .metrics-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -266,6 +275,7 @@
             gap: 10px;
             align-items: center;
             margin: 15px 0;
+            flex-wrap: wrap;
         }
 
         select {
@@ -360,6 +370,8 @@
             </p>
             <div class="rating-matrix" id="ratingMatrixContainer"></div>
         </div>
+
+        <div id="errorContainer"></div>
 
         <div id="resultsSection" style="display: none;">
             
@@ -457,6 +469,16 @@
         let svdResult = null;
         let originalMatrix = [];
 
+        // Check if numeric.js loaded
+        function checkLibraries() {
+            if (typeof numeric === 'undefined') {
+                throw new Error('numeric.js library failed to load. Please check your internet connection.');
+            }
+            if (typeof Plotly === 'undefined') {
+                throw new Error('Plotly library failed to load. Please check your internet connection.');
+            }
+        }
+
         function loadSmallDataset() {
             users = ['Alice', 'Bob', 'Carol', 'Dave', 'Eve'];
             movies = ['Inception', 'Titanic', 'The Matrix', 'Frozen', 'Interstellar', 'Avatar'];
@@ -470,6 +492,7 @@
             ];
             
             renderRatingMatrix();
+            document.getElementById('errorContainer').innerHTML = '';
         }
 
         function loadMediumDataset() {
@@ -488,6 +511,7 @@
             ];
             
             renderRatingMatrix();
+            document.getElementById('errorContainer').innerHTML = '';
         }
 
         function loadNetflixExample() {
@@ -503,6 +527,7 @@
             ];
             
             renderRatingMatrix();
+            document.getElementById('errorContainer').innerHTML = '';
         }
 
         function loadSparseDataset() {
@@ -519,6 +544,7 @@
             ];
             
             renderRatingMatrix();
+            document.getElementById('errorContainer').innerHTML = '';
         }
 
         function generateRandomDataset() {
@@ -534,6 +560,7 @@
             );
             
             renderRatingMatrix();
+            document.getElementById('errorContainer').innerHTML = '';
         }
 
         function renderRatingMatrix() {
@@ -567,32 +594,68 @@
 
         function resetMatrix() {
             loadSmallDataset();
+            document.getElementById('resultsSection').style.display = 'none';
         }
 
         function calculateRecommendations() {
             try {
+                // Clear previous errors
+                document.getElementById('errorContainer').innerHTML = '';
+
+                // Check libraries
+                checkLibraries();
+
                 // Store original matrix
                 originalMatrix = ratingMatrix.map(row => [...row]);
 
-                // Replace zeros with average rating for SVD
+                // Validate matrix has some ratings
+                const totalRatings = ratingMatrix.flat().filter(r => r > 0).length;
+                if (totalRatings === 0) {
+                    throw new Error('Please enter at least some ratings (1-5) in the matrix!');
+                }
+
+                // Calculate average rating for filling zeros
                 const flatRatings = ratingMatrix.flat().filter(r => r > 0);
                 const avgRating = flatRatings.reduce((a, b) => a + b, 0) / flatRatings.length;
 
+                console.log('Average rating:', avgRating);
+                console.log('Original matrix:', originalMatrix);
+
+                // Create matrix for SVD (replace zeros with average)
                 const matrixForSVD = ratingMatrix.map(row => 
                     row.map(val => val === 0 ? avgRating : val)
                 );
 
-                // Perform SVD
-                svdResult = numeric.svd(matrixForSVD);
+                console.log('Matrix for SVD:', matrixForSVD);
+
+                // Perform SVD using numeric.js
+                try {
+                    svdResult = numeric.svd(matrixForSVD);
+                    console.log('SVD Result:', svdResult);
+
+                    // Validate SVD result
+                    if (!svdResult || !svdResult.U || !svdResult.S || !svdResult.V) {
+                        throw new Error('SVD calculation returned invalid result');
+                    }
+
+                    if (!Array.isArray(svdResult.S) || svdResult.S.length === 0) {
+                        throw new Error('SVD singular values are invalid');
+                    }
+
+                } catch (svdError) {
+                    console.error('SVD Error:', svdError);
+                    throw new Error('SVD computation failed: ' + svdError.message);
+                }
 
                 // Calculate metrics
                 const numUsers = users.length;
                 const numMovies = movies.length;
-                const totalRatings = ratingMatrix.flat().filter(r => r > 0).length;
                 const sparsity = ((numUsers * numMovies - totalRatings) / (numUsers * numMovies) * 100).toFixed(1);
                 
                 const tolerance = 0.1;
                 const effectiveRank = svdResult.S.filter(s => s > tolerance).length;
+
+                console.log('Metrics calculated');
 
                 // Update metrics
                 document.getElementById('numUsers').textContent = numUsers;
@@ -627,28 +690,46 @@
                 // Update recommendations
                 updateRecommendations();
 
+                // Show success message
+                document.getElementById('errorContainer').innerHTML = 
+                    '<div class="success-box"><strong>✅ Success!</strong> SVD calculated successfully. Check the results below!</div>';
+
             } catch (error) {
-                alert('Error calculating SVD: ' + error.message);
-                console.error(error);
+                console.error('Full error:', error);
+                document.getElementById('errorContainer').innerHTML = 
+                    `<div class="error-box"><strong>❌ Error:</strong> ${error.message}<br><br>
+                    <strong>Tips:</strong><br>
+                    • Make sure you have internet connection (libraries need to load)<br>
+                    • Try refreshing the page<br>
+                    • Use one of the pre-loaded datasets<br>
+                    • Make sure ratings are between 0-5</div>`;
+                document.getElementById('resultsSection').style.display = 'none';
             }
         }
 
         function updateRecommendations() {
-            const userIdx = parseInt(document.getElementById('userSelect').value);
-            const rank = parseInt(document.getElementById('rankSelect').value);
+            try {
+                const userIdx = parseInt(document.getElementById('userSelect').value);
+                const rank = parseInt(document.getElementById('rankSelect').value);
 
-            // Reconstruct matrix with given rank
-            const predictedMatrix = reconstructMatrix(rank);
+                // Reconstruct matrix with given rank
+                const predictedMatrix = reconstructMatrix(rank);
 
-            // Display recommendations for selected user
-            displayRecommendations(userIdx, predictedMatrix);
+                // Display recommendations for selected user
+                displayRecommendations(userIdx, predictedMatrix);
 
-            // Display full predicted matrix
-            displayPredictedMatrix(predictedMatrix);
+                // Display full predicted matrix
+                displayPredictedMatrix(predictedMatrix);
 
-            // Calculate and display similarities
-            calculateUserSimilarity(userIdx, rank);
-            calculateMovieSimilarity(rank);
+                // Calculate and display similarities
+                calculateUserSimilarity(userIdx, rank);
+                calculateMovieSimilarity(rank);
+
+            } catch (error) {
+                console.error('Error updating recommendations:', error);
+                document.getElementById('errorContainer').innerHTML = 
+                    `<div class="error-box"><strong>Error:</strong> ${error.message}</div>`;
+            }
         }
 
         function reconstructMatrix(k) {
@@ -918,7 +999,16 @@
 
         // Initialize with default dataset
         window.onload = () => {
-            loadSmallDataset();
+            console.log('Page loaded');
+            try {
+                checkLibraries();
+                console.log('Libraries loaded successfully');
+                loadSmallDataset();
+            } catch (error) {
+                document.getElementById('errorContainer').innerHTML = 
+                    `<div class="error-box"><strong>❌ Error loading page:</strong> ${error.message}<br>
+                    Please refresh the page and check your internet connection.</div>`;
+            }
         };
     </script>
 </body>
