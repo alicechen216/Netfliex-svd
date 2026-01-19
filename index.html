@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SVD Recommendation System - Netflix Style</title>
-    <!-- Using ml-matrix which has reliable SVD -->
-    <script src="https://cdn.jsdelivr.net/npm/ml-matrix@6.10.4/matrix.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
     <style>
         * {
@@ -348,7 +347,7 @@
 
             <div class="dataset-options">
                 <button onclick="loadSmallDataset()">📱 Small Dataset (5×6)</button>
-                <button onclick="loadMediumDataset()">💻 Medium Dataset (8×10)</button>
+                <button onclick="loadMediumDataset()">💻 Medium Dataset (6×8)</button>
                 <button onclick="loadNetflixExample()">🎬 Netflix Example</button>
                 <button onclick="loadSparseDataset()">⭐ Sparse Dataset</button>
                 <button class="secondary" onclick="generateRandomDataset()">🎲 Random Dataset</button>
@@ -466,6 +465,11 @@
         let svdResult = null;
         let originalMatrix = [];
 
+        // Helper: Transpose matrix
+        function transpose(matrix) {
+            return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]));
+        }
+
         function loadSmallDataset() {
             users = ['Alice', 'Bob', 'Carol', 'Dave', 'Eve'];
             movies = ['Inception', 'Titanic', 'The Matrix', 'Frozen', 'Interstellar', 'Avatar'];
@@ -501,14 +505,14 @@
 
         function loadNetflixExample() {
             users = ['SciFi Fan', 'Rom-Com Lover', 'Action Hero', 'Drama Queen', 'Horror Buff'];
-            movies = ['Stranger Things', 'The Notebook', 'Die Hard', 'The Crown', 'Get Out', 'Blade Runner', 'Love Actually', 'Avengers'];
+            movies = ['Stranger Things', 'The Notebook', 'Die Hard', 'The Crown', 'Get Out'];
             
             ratingMatrix = [
-                [5, 1, 2, 2, 3, 5, 0, 3],
-                [1, 5, 1, 4, 1, 0, 5, 1],
-                [2, 1, 5, 1, 2, 3, 0, 5],
-                [2, 4, 1, 5, 2, 1, 4, 0],
-                [4, 1, 3, 2, 5, 3, 0, 2]
+                [5, 1, 2, 2, 3],
+                [1, 5, 1, 4, 1],
+                [2, 1, 5, 1, 2],
+                [2, 4, 1, 5, 2],
+                [4, 1, 3, 2, 5]
             ];
             
             renderRatingMatrix();
@@ -534,13 +538,13 @@
 
         function generateRandomDataset() {
             const numUsers = 6;
-            const numMovies = 8;
+            const numMovies = 6;
             users = Array.from({length: numUsers}, (_, i) => `User${i+1}`);
             movies = Array.from({length: numMovies}, (_, i) => `Movie${i+1}`);
             
             ratingMatrix = Array(numUsers).fill(0).map(() => 
                 Array(numMovies).fill(0).map(() => 
-                    Math.random() > 0.6 ? Math.floor(Math.random() * 5) + 1 : 0
+                    Math.random() > 0.5 ? Math.floor(Math.random() * 5) + 1 : 0
                 )
             );
             
@@ -586,42 +590,64 @@
             try {
                 document.getElementById('errorContainer').innerHTML = '';
 
-                // Check if MLMatrix is loaded
-                if (typeof MLMatrix === 'undefined') {
-                    throw new Error('Matrix library failed to load. Please refresh the page.');
+                if (typeof numeric === 'undefined') {
+                    throw new Error('SVD library failed to load. Please refresh the page.');
                 }
 
-                // Store original matrix
+                // Store original
                 originalMatrix = ratingMatrix.map(row => [...row]);
 
                 // Validate
                 const totalRatings = ratingMatrix.flat().filter(r => r > 0).length;
                 if (totalRatings === 0) {
-                    throw new Error('Please enter at least some ratings (1-5) in the matrix!');
+                    throw new Error('Please enter at least some ratings (1-5)!');
                 }
 
-                // Calculate average for filling zeros
+                // Calculate average
                 const flatRatings = ratingMatrix.flat().filter(r => r > 0);
                 const avgRating = flatRatings.reduce((a, b) => a + b, 0) / flatRatings.length;
 
-                // Prepare matrix for SVD
+                // Prepare matrix
                 const matrixForSVD = ratingMatrix.map(row => 
                     row.map(val => val === 0 ? avgRating : val)
                 );
 
-                // Perform SVD using ml-matrix
-                const matrix = new MLMatrix.Matrix(matrixForSVD);
-                const svd = new MLMatrix.SVD(matrix);
+                const numRows = matrixForSVD.length;
+                const numCols = matrixForSVD[0].length;
 
-                svdResult = {
-                    U: svd.leftSingularVectors.to2DArray(),
-                    S: svd.diagonal,
-                    V: svd.rightSingularVectors.to2DArray()
-                };
+                console.log('Matrix dimensions:', numRows, 'x', numCols);
+
+                let svd;
+                let needsTranspose = false;
+
+                // numeric.js requires rows >= cols
+                if (numRows < numCols) {
+                    console.log('Transposing matrix for SVD...');
+                    const transposed = transpose(matrixForSVD);
+                    svd = numeric.svd(transposed);
+                    needsTranspose = true;
+                } else {
+                    svd = numeric.svd(matrixForSVD);
+                }
+
+                // Store result (swap U and V if transposed)
+                if (needsTranspose) {
+                    svdResult = {
+                        U: svd.V,  // Swap!
+                        S: svd.S,
+                        V: svd.U   // Swap!
+                    };
+                } else {
+                    svdResult = {
+                        U: svd.U,
+                        S: svd.S,
+                        V: svd.V
+                    };
+                }
 
                 console.log('SVD Success!', svdResult);
 
-                // Calculate metrics
+                // Metrics
                 const numUsers = users.length;
                 const numMovies = movies.length;
                 const sparsity = ((numUsers * numMovies - totalRatings) / (numUsers * numMovies) * 100).toFixed(1);
@@ -629,7 +655,6 @@
                 const tolerance = 0.1;
                 const effectiveRank = svdResult.S.filter(s => s > tolerance).length;
 
-                // Update metrics
                 document.getElementById('numUsers').textContent = numUsers;
                 document.getElementById('numMovies').textContent = numMovies;
                 document.getElementById('effectiveRank').textContent = effectiveRank;
@@ -639,7 +664,7 @@
                 plotSingularValues(svdResult.S);
                 plotErrorAnalysis(svdResult.S);
 
-                // Populate selectors
+                // Selectors
                 const userSelect = document.getElementById('userSelect');
                 userSelect.innerHTML = users.map((user, i) => 
                     `<option value="${i}">${user}</option>`
@@ -658,14 +683,13 @@
                 updateRecommendations();
 
                 document.getElementById('errorContainer').innerHTML = 
-                    '<div class="success-box"><strong>✅ Success!</strong> SVD calculated successfully. Scroll down to see results!</div>';
+                    '<div class="success-box"><strong>✅ Success!</strong> SVD calculated. Scroll down for results!</div>';
 
             } catch (error) {
                 console.error('Error:', error);
                 document.getElementById('errorContainer').innerHTML = 
                     `<div class="error-box"><strong>❌ Error:</strong> ${error.message}<br><br>
-                    <strong>Debug info:</strong> Check browser console (F12) for details.<br>
-                    <strong>Try:</strong> Refresh page and use a pre-loaded dataset.</div>`;
+                    Try using one of the pre-loaded datasets.</div>`;
                 document.getElementById('resultsSection').style.display = 'none';
             }
         }
@@ -797,7 +821,7 @@
             similarities.sort((a, b) => b.similarity - a.similarity);
 
             let html = '<h4>Most Similar Users to ' + users[userIdx] + ':</h4>';
-            similarities.slice(1, 4).forEach(sim => {
+            similarities.slice(1, Math.min(4, similarities.length)).forEach(sim => {
                 const percentage = (sim.similarity * 100).toFixed(1);
                 html += `
                     <div class="similarity-item">
@@ -941,9 +965,7 @@
 
         // Initialize
         window.onload = () => {
-            console.log('Loading...');
             loadSmallDataset();
-            console.log('Ready! MLMatrix available:', typeof MLMatrix !== 'undefined');
         };
     </script>
 </body>
